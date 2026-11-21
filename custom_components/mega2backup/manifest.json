@@ -1,0 +1,14 @@
+{
+  "domain": "mega2backup",
+  "name": "Mega Backup",
+  "codeowners": ["@Schnax3"],
+  "config_flow": true,
+  "dependencies": ["backup"],
+  "documentation": "https://github.com/Schnax3/mega2backup",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/Schnax3/mega2backup/issues",
+  "loggers": ["mega"],
+  "requirements": ["async-mega-py==2.4.1"],
+  "version": "0.1.0"
+}

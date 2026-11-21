@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mega Backup",
+        "description": "Speichere Home-Assistant-Backups in deinem Mega.io-Konto. Die Backups werden in einen Ordner im Hauptverzeichnis deines Cloud-Speichers hochgeladen. Der Ordner wird angelegt, falls er nicht existiert.",
+        "data": {
+          "email": "Mega-E-Mail-Adresse",
+          "password": "Passwort",
+          "folder": "Backup-Ordner"
+        },
+        "data_description": {
+          "email": "Die E-Mail-Adresse deines Mega-Kontos.",
+          "password": "Das Passwort deines Mega-Kontos.",
+          "folder": "Name des Ordners für die Backups (eine Ebene, keine Schrägstriche)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Mega erneut anmelden",
+        "description": "Die Anmeldung für {email} ist fehlgeschlagen. Bitte gib das aktuelle Passwort ein.",
+        "data": {
+          "password": "Passwort"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zu Mega fehlgeschlagen. Bitte später erneut versuchen.",
+      "invalid_auth": "Ungültige E-Mail-Adresse oder ungültiges Passwort.",
+      "invalid_folder": "Der Ordnername ist leer oder enthält Zeichen, die Mega nicht erlaubt (\" * / : < > ? \\ |).",
+      "mfa_required": "Dieses Konto nutzt Zwei-Faktor-Authentifizierung, die noch nicht unterstützt wird. Deaktiviere sie für das Konto, um die Integration zu nutzen.",
+      "unknown": "Unerwarteter Fehler. Details stehen im Home-Assistant-Log."
+    },
+    "abort": {
+      "already_configured": "Dieses Mega-Konto ist bereits eingerichtet.",
+      "reauth_successful": "Die erneute Anmeldung war erfolgreich."
+    }
+  }
+}

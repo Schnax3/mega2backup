@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mega Backup",
+        "description": "Store Home Assistant backups in your Mega.io account. Backups are uploaded into one folder in the root of your cloud drive. The folder is created if it does not exist.",
+        "data": {
+          "email": "Mega e-mail address",
+          "password": "Password",
+          "folder": "Backup folder"
+        },
+        "data_description": {
+          "email": "The e-mail address of your Mega account.",
+          "password": "The password of your Mega account.",
+          "folder": "Name of the folder for the backups (one level, no slashes)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Mega",
+        "description": "The login for {email} failed. Please enter the current password.",
+        "data": {
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Mega. Please try again later.",
+      "invalid_auth": "Invalid e-mail address or password.",
+      "invalid_folder": "The folder name is empty or contains characters Mega does not allow (\" * / : < > ? \\ |).",
+      "mfa_required": "This account uses two-factor authentication, which is not supported yet. Disable it for the account to use this integration.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This Mega account is already configured.",
+      "reauth_successful": "Re-authentication was successful."
+    }
+  }
+}

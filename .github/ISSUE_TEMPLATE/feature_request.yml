@@ -1,0 +1,10 @@
+name: Feature-Wunsch
+description: Eine Idee oder Verbesserung vorschlagen
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Was soll möglich sein?
+    validations:
+      required: true

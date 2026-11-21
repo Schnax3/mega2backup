@@ -1,0 +1,29 @@
+name: Fehlerbericht
+description: Etwas funktioniert nicht wie erwartet
+labels: [bug]
+body:
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home-Assistant-Version
+      placeholder: "2026.11.0"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version von Mega Backup
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Was ist passiert?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Bitte Debug-Logging für `custom_components.mega2backup` und `mega` aktivieren. Passwörter und E-Mail-Adressen entfernen!
+      render: text
