@@ -259,12 +259,12 @@ class MegaBackupClient:
         if (cached := self._json_cache.get(node.id)) is not None:
             return cached
 
-        tmp_dir = Path(await self._hass.async_add_executor_job(_make_temp_dir))
+        tmp_dir = await async_make_temp_dir(self._hass)
         try:
             path = await self.async_download(node, tmp_dir)
             text = await self._hass.async_add_executor_job(path.read_text, "utf-8")
         finally:
-            await self._hass.async_add_executor_job(_remove_dir, tmp_dir)
+            await async_remove_dir(self._hass, tmp_dir)
 
         try:
             data = json.loads(text)
@@ -307,19 +307,45 @@ class MegaBackupClient:
                 self._json_cache.pop(node.id, None)
 
 
-def _make_temp_dir() -> str:
-    return tempfile.mkdtemp(prefix="mega2backup_")
+def _temp_base(hass: HomeAssistant) -> Path:
+    """Return the staging directory.
+
+    It lives inside the Home Assistant config directory (the data partition)
+    because /tmp is often a small RAM disk, which is too small for backups.
+    """
+    return Path(hass.config.path("mega2backup_tmp"))
+
+
+def _make_temp_dir(base: Path) -> str:
+    base.mkdir(parents=True, exist_ok=True)
+    return tempfile.mkdtemp(prefix="job_", dir=base)
 
 
 def _remove_dir(path: Path | str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _free_space(base: Path) -> int:
+    base.mkdir(parents=True, exist_ok=True)
+    return shutil.disk_usage(base).free
+
+
 async def async_make_temp_dir(hass: HomeAssistant) -> Path:
     """Create a temporary working directory."""
-    return Path(await hass.async_add_executor_job(_make_temp_dir))
+    base = _temp_base(hass)
+    return Path(await hass.async_add_executor_job(_make_temp_dir, base))
 
 
 async def async_remove_dir(hass: HomeAssistant, path: Path) -> None:
     """Remove a temporary working directory."""
     await hass.async_add_executor_job(_remove_dir, path)
+
+
+async def async_cleanup_temp(hass: HomeAssistant) -> None:
+    """Remove leftovers of interrupted transfers (call when no transfer runs)."""
+    await hass.async_add_executor_job(_remove_dir, _temp_base(hass))
+
+
+async def async_free_space(hass: HomeAssistant) -> int:
+    """Return the free bytes on the staging partition."""
+    return await hass.async_add_executor_job(_free_space, _temp_base(hass))

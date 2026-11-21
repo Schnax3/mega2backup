@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
-from .api import MegaAuthError, MegaBackupClient, MegaError
+from .api import MegaAuthError, MegaBackupClient, MegaError, async_cleanup_temp
 from .const import (
     CONF_EMAIL,
     CONF_FOLDER,
@@ -24,6 +24,7 @@ type MegaConfigEntry = ConfigEntry[MegaBackupClient]
 
 async def async_setup_entry(hass: HomeAssistant, entry: MegaConfigEntry) -> bool:
     """Set up Mega Backup from a config entry."""
+    await async_cleanup_temp(hass)
     client = MegaBackupClient(
         hass,
         entry.data[CONF_EMAIL],

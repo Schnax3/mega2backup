@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant, callback
 from . import MegaConfigEntry
 from .api import (
     MegaError,
+    async_free_space,
     async_make_temp_dir,
     async_remove_dir,
 )
@@ -112,7 +113,7 @@ class MegaBackupAgent(BackupAgent):
         tmp_dir = await async_make_temp_dir(self._hass)
         try:
             path = await self._client.async_download(node, tmp_dir)
-        except MegaError as err:
+        except (MegaError, OSError) as err:
             await async_remove_dir(self._hass, tmp_dir)
             raise BackupAgentError(f"Failed to download backup: {err}") from err
         except BaseException:
@@ -146,6 +147,16 @@ class MegaBackupAgent(BackupAgent):
     ) -> None:
         """Upload a backup."""
         hass = self._hass
+        try:
+            free = await async_free_space(hass)
+        except OSError as err:
+            raise BackupAgentError(f"Cannot access staging directory: {err}") from err
+        if free < backup.size * 1.05:
+            raise BackupAgentError(
+                f"Not enough free disk space to stage the backup: "
+                f"{free // 2**20} MiB free, {backup.size // 2**20} MiB needed"
+            )
+
         tmp_dir = await async_make_temp_dir(hass)
         tar_path = tmp_dir / _tar_name(backup.backup_id)
         metadata_path = tmp_dir / _metadata_name(backup.backup_id)
@@ -193,6 +204,8 @@ class MegaBackupAgent(BackupAgent):
                 except MegaError:
                     _LOGGER.warning("Could not clean up incomplete upload")
             raise BackupAgentError(f"Failed to upload backup: {err}") from err
+        except OSError as err:
+            raise BackupAgentError(f"Failed to stage backup on disk: {err}") from err
         finally:
             await async_remove_dir(hass, tmp_dir)
 
