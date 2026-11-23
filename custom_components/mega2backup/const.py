@@ -29,6 +29,10 @@ METADATA_SUFFIX = ".metadata.json"
 # How long the folder listing is cached (seconds).
 LISTING_CACHE_TTL = 300
 
+# Chunks of a backup stream are collected up to this size before they are
+# written to disk (fewer, larger writes are much faster).
+STAGING_BUFFER_SIZE = 8 * 1024 * 1024
+
 # Size of the chunks handed to Home Assistant when a backup is downloaded.
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 

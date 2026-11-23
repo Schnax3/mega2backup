@@ -149,6 +149,36 @@ def _upload_progress(callback: ProgressCallback | None) -> Generator[None]:
         factory_var.reset(token)
 
 
+class _TempfileShim:
+    """Make async-mega-py create its download temp files in our staging dir.
+
+    The library downloads into the system temp directory first, which is a
+    small RAM disk on Home Assistant OS. The shim is only installed in the
+    library's own module, the global ``tempfile`` module stays untouched.
+    """
+
+    def __init__(self, base: Path) -> None:
+        self._base = base
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(tempfile, name)
+
+    def NamedTemporaryFile(self, *args: Any, **kwargs: Any) -> Any:
+        """Create the temporary file inside the staging directory."""
+        self._base.mkdir(parents=True, exist_ok=True)
+        kwargs.setdefault("dir", str(self._base))
+        return tempfile.NamedTemporaryFile(*args, **kwargs)
+
+
+def _redirect_library_temp_files(base: Path) -> None:
+    try:
+        from mega import download as mega_download  # noqa: PLC0415
+
+        mega_download.tempfile = _TempfileShim(base)  # type: ignore[attr-defined]
+    except (ImportError, AttributeError):
+        _LOGGER.debug("Could not redirect async-mega-py temp files")
+
+
 class MegaBackupClient:
     """Stores and retrieves backup files in one folder of a Mega account."""
 
@@ -164,6 +194,7 @@ class MegaBackupClient:
         self._email = email
         self._password = password
         self._folder = validate_folder_name(folder)
+        _redirect_library_temp_files(_temp_base(hass))
         # Transfers can take a long time, so no total timeout.
         self._session = async_create_clientsession(
             hass,
@@ -188,6 +219,7 @@ class MegaBackupClient:
 
     async def async_connect(self) -> None:
         """Log in and make sure the backup folder exists."""
+        _redirect_library_tempdir(_temp_base(self._hass))
         async with self._lock:
             await self._async_login()
         await self._call(self._async_ensure_folder)
@@ -324,6 +356,39 @@ class MegaBackupClient:
             self.invalidate_cache()
             for node in nodes:
                 self._json_cache.pop(node.id, None)
+
+
+class _TempfileShim:
+    """Stand-in for ``tempfile`` inside ``mega.download``.
+
+    async-mega-py writes every download to a temporary file in the system temp
+    directory before moving it. On Home Assistant OS that directory is a small
+    RAM disk, so large backups would fill it. The shim puts those files into
+    our own staging directory on the data partition instead.
+    """
+
+    def __init__(self, directory: Path) -> None:
+        self._directory = directory
+
+    def NamedTemporaryFile(self, *args: Any, **kwargs: Any) -> Any:
+        """Create the temporary file in the staging directory."""
+        kwargs.setdefault("dir", self._directory)
+        return tempfile.NamedTemporaryFile(*args, **kwargs)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(tempfile, name)
+
+
+def _redirect_library_tempdir(directory: Path) -> None:
+    """Make async-mega-py create its download temp files in *directory*."""
+    try:
+        from mega import download as mega_download  # noqa: PLC0415
+    except ImportError:
+        return
+    if hasattr(mega_download, "tempfile"):
+        mega_download.tempfile = _TempfileShim(directory)
+    else:  # pragma: no cover
+        _LOGGER.debug("async-mega-py no longer uses tempfile, nothing to redirect")
 
 
 def _temp_base(hass: HomeAssistant) -> Path:

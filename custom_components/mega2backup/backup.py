@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
     DOWNLOAD_CHUNK_SIZE,
     METADATA_SUFFIX,
+    STAGING_BUFFER_SIZE,
     TAR_SUFFIX,
 )
 
@@ -225,7 +226,7 @@ class MegaBackupAgent(BackupAgent):
         metadata_path = tmp_dir / _metadata_name(backup.backup_id)
         uploaded_nodes = []
         started = time.monotonic()
-        next_log_percent = 25
+        next_log_percent = 10
 
         _LOGGER.info(
             "Starting upload of backup '%s' (%s, %.1f MiB) to Mega folder '%s'",
@@ -241,21 +242,43 @@ class MegaBackupAgent(BackupAgent):
                 on_progress(bytes_uploaded=bytes_uploaded)
             if backup.size > 0:
                 percent = bytes_uploaded * 100 // backup.size
-                while percent >= next_log_percent <= 75:
+                while percent >= next_log_percent <= 90:
                     _LOGGER.info(
                         "Uploading backup %s to Mega: %d%%",
                         backup.backup_id,
                         next_log_percent,
                     )
-                    next_log_percent += 25
+                    next_log_percent += 10
 
         try:
             # Stage the stream on disk, async-mega-py uploads from files.
             stream = await open_stream()
             handle = await hass.async_add_executor_job(tar_path.open, "wb")
+            staged = 0
+            next_stage_percent = 10
+            buffer = bytearray()
             try:
                 async for chunk in stream:
-                    await hass.async_add_executor_job(handle.write, chunk)
+                    buffer += chunk
+                    if len(buffer) < STAGING_BUFFER_SIZE:
+                        continue
+                    data = bytes(buffer)
+                    buffer.clear()
+                    await hass.async_add_executor_job(handle.write, data)
+                    staged += len(data)
+                    if backup.size > 0:
+                        while staged * 100 // backup.size >= next_stage_percent:
+                            _LOGGER.info(
+                                "Staging backup %s on disk: %d%% (%d of %d MiB)",
+                                backup.backup_id,
+                                min(next_stage_percent, 100),
+                                staged // 2**20,
+                                backup.size // 2**20,
+                            )
+                            next_stage_percent += 10
+                if buffer:
+                    await hass.async_add_executor_job(handle.write, bytes(buffer))
+                    staged += len(buffer)
             finally:
                 await hass.async_add_executor_job(handle.close)
 
@@ -329,7 +352,9 @@ class MegaBackupAgent(BackupAgent):
                 if (node := files.get(name)) is not None
             ]
             if not nodes:
-                _LOGGER.warning("Backup %s to delete not found in Mega", backup_id)
+                # Home Assistant asks every agent when it deletes a backup, so
+                # this is normal for backups that are not stored in Mega.
+                _LOGGER.debug("Backup %s is not in Mega, nothing to delete", backup_id)
                 raise BackupNotFound(f"Backup {backup_id} not found")
             await self._client.async_delete(*nodes)
             _LOGGER.info("Deleted backup %s from Mega", backup_id)
@@ -375,7 +400,7 @@ class MegaBackupAgent(BackupAgent):
                 files = await self._client.async_list_files(force=True)
                 node = files.get(_metadata_name(backup_id))
             if node is None or _tar_name(backup_id) not in files:
-                _LOGGER.warning("Backup %s not found in Mega folder", backup_id)
+                _LOGGER.debug("Backup %s is not in Mega", backup_id)
                 raise BackupNotFound(f"Backup {backup_id} not found")
             data = await self._client.async_read_json(node)
             return AgentBackup.from_dict(data)
