@@ -22,6 +22,12 @@ _LOGGER = logging.getLogger(__name__)
 type MegaConfigEntry = ConfigEntry[MegaBackupClient]
 
 
+def _mask_email(email: str) -> str:
+    """Hide most of the local part so logs can be shared safely."""
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}"
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: MegaConfigEntry) -> bool:
     """Set up Mega Backup from a config entry."""
     await async_cleanup_temp(hass)
@@ -36,14 +42,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: MegaConfigEntry) -> bool
         await client.async_connect()
     except MegaAuthError as err:
         await client.async_close()
+        _LOGGER.error("Mega login failed, please re-authenticate: %s", err)
         raise ConfigEntryAuthFailed(
             f"Login to Mega failed for {entry.data[CONF_EMAIL]}: {err}"
         ) from err
     except MegaError as err:
         await client.async_close()
+        _LOGGER.warning("Could not reach Mega, will retry: %s", err)
         raise ConfigEntryNotReady(f"Could not connect to Mega: {err}") from err
 
     entry.runtime_data = client
+    _LOGGER.info(
+        "Connected to Mega account %s, backups go to folder '%s'",
+        _mask_email(entry.data[CONF_EMAIL]),
+        client.folder,
+    )
 
     @callback
     def _async_notify_backup_listeners() -> None:

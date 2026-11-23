@@ -200,7 +200,7 @@ class MegaBackupClient:
             except MegaSessionExpiredError as err:
                 if attempt == 2:
                     raise MegaAuthError(str(err)) from err
-                _LOGGER.debug("Mega session expired, logging in again")
+                _LOGGER.info("Mega session expired, logging in again")
                 async with self._lock:
                     self._client = None
         raise MegaApiError("unreachable")  # pragma: no cover
@@ -210,6 +210,7 @@ class MegaBackupClient:
         try:
             node = fs.find(self._folder)
         except FileNotFoundError:
+            _LOGGER.info("Creating Mega backup folder '%s'", self._folder)
             return await client.create_folder(self._folder)
         if not node.is_folder:
             raise MegaApiError(f"'{self._folder}' exists but is not a folder")

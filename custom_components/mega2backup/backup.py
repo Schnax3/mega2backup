@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Coroutine
 import json
 import logging
+import time
 from typing import Any
 
 from homeassistant.components.backup import (
@@ -67,6 +68,12 @@ def async_register_backup_agents_listener(
     return remove_listener
 
 
+def _format_duration(seconds: float) -> str:
+    """Return a short human readable duration."""
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes} min {secs} s" if minutes else f"{secs} s"
+
+
 def _tar_name(backup_id: str) -> str:
     return f"{backup_id}{TAR_SUFFIX}"
 
@@ -106,7 +113,15 @@ class MegaBackupAgent(BackupAgent):
 
         node = files.get(_tar_name(backup_id))
         if node is None:
+            _LOGGER.warning("Backup %s not found in Mega folder", backup_id)
             raise BackupNotFound(f"Backup {backup_id} not found")
+
+        _LOGGER.info(
+            "Downloading backup %s from Mega (%.1f MiB), staging it on disk first",
+            backup_id,
+            (getattr(node, "size", None) or 0) / 2**20,
+        )
+        started = time.monotonic()
 
         # async-mega-py downloads to a file, so the backup is staged on disk
         # first and then streamed to Home Assistant.
@@ -115,10 +130,17 @@ class MegaBackupAgent(BackupAgent):
             path = await self._client.async_download(node, tmp_dir)
         except (MegaError, OSError) as err:
             await async_remove_dir(self._hass, tmp_dir)
+            _LOGGER.error("Download of backup %s from Mega failed: %s", backup_id, err)
             raise BackupAgentError(f"Failed to download backup: {err}") from err
         except BaseException:
             await async_remove_dir(self._hass, tmp_dir)
             raise
+
+        _LOGGER.info(
+            "Backup %s downloaded from Mega in %s, handing it to Home Assistant",
+            backup_id,
+            _format_duration(time.monotonic() - started),
+        )
 
         hass = self._hass
 
@@ -152,6 +174,13 @@ class MegaBackupAgent(BackupAgent):
         except OSError as err:
             raise BackupAgentError(f"Cannot access staging directory: {err}") from err
         if free < backup.size * 1.05:
+            _LOGGER.error(
+                "Not enough free disk space to stage backup %s: %d MiB free, "
+                "%d MiB needed",
+                backup.backup_id,
+                free // 2**20,
+                backup.size // 2**20,
+            )
             raise BackupAgentError(
                 f"Not enough free disk space to stage the backup: "
                 f"{free // 2**20} MiB free, {backup.size // 2**20} MiB needed"
@@ -161,10 +190,30 @@ class MegaBackupAgent(BackupAgent):
         tar_path = tmp_dir / _tar_name(backup.backup_id)
         metadata_path = tmp_dir / _metadata_name(backup.backup_id)
         uploaded_nodes = []
+        started = time.monotonic()
+        next_log_percent = 25
+
+        _LOGGER.info(
+            "Starting upload of backup '%s' (%s, %.1f MiB) to Mega folder '%s'",
+            backup.name,
+            backup.backup_id,
+            backup.size / 2**20,
+            self._client.folder,
+        )
 
         def _report(bytes_uploaded: int) -> None:
+            nonlocal next_log_percent
             if on_progress is not None:
                 on_progress(bytes_uploaded=bytes_uploaded)
+            if backup.size > 0:
+                percent = bytes_uploaded * 100 // backup.size
+                while percent >= next_log_percent <= 75:
+                    _LOGGER.info(
+                        "Uploading backup %s to Mega: %d%%",
+                        backup.backup_id,
+                        next_log_percent,
+                    )
+                    next_log_percent += 25
 
         try:
             # Stage the stream on disk, async-mega-py uploads from files.
@@ -175,6 +224,12 @@ class MegaBackupAgent(BackupAgent):
                     await hass.async_add_executor_job(handle.write, chunk)
             finally:
                 await hass.async_add_executor_job(handle.close)
+
+            _LOGGER.info(
+                "Backup %s staged on disk in %s, uploading to Mega",
+                backup.backup_id,
+                _format_duration(time.monotonic() - started),
+            )
 
             await hass.async_add_executor_job(
                 metadata_path.write_text,
@@ -193,11 +248,22 @@ class MegaBackupAgent(BackupAgent):
                 if (node := files.get(name)) is not None
             ]
             if existing:
+                _LOGGER.info(
+                    "Replacing existing backup %s in Mega folder", backup.backup_id
+                )
                 await self._client.async_delete(*existing)
 
             uploaded_nodes.append(await self._client.async_upload(tar_path, _report))
             uploaded_nodes.append(await self._client.async_upload(metadata_path))
+            _LOGGER.info(
+                "Backup %s uploaded to Mega in %s",
+                backup.backup_id,
+                _format_duration(time.monotonic() - started),
+            )
         except MegaError as err:
+            _LOGGER.error(
+                "Upload of backup %s to Mega failed: %s", backup.backup_id, err
+            )
             if uploaded_nodes:
                 try:
                     await self._client.async_delete(*uploaded_nodes)
@@ -205,6 +271,11 @@ class MegaBackupAgent(BackupAgent):
                     _LOGGER.warning("Could not clean up incomplete upload")
             raise BackupAgentError(f"Failed to upload backup: {err}") from err
         except OSError as err:
+            _LOGGER.error(
+                "Could not stage backup %s on disk (disk full?): %s",
+                backup.backup_id,
+                err,
+            )
             raise BackupAgentError(f"Failed to stage backup on disk: {err}") from err
         finally:
             await async_remove_dir(hass, tmp_dir)
@@ -223,9 +294,12 @@ class MegaBackupAgent(BackupAgent):
                 if (node := files.get(name)) is not None
             ]
             if not nodes:
+                _LOGGER.warning("Backup %s to delete not found in Mega", backup_id)
                 raise BackupNotFound(f"Backup {backup_id} not found")
             await self._client.async_delete(*nodes)
+            _LOGGER.info("Deleted backup %s from Mega", backup_id)
         except MegaError as err:
+            _LOGGER.error("Deleting backup %s from Mega failed: %s", backup_id, err)
             raise BackupAgentError(f"Failed to delete backup: {err}") from err
 
     async def async_list_backups(self, **kwargs: Any) -> list[AgentBackup]:
@@ -245,7 +319,9 @@ class MegaBackupAgent(BackupAgent):
                 except (KeyError, TypeError, ValueError) as err:
                     _LOGGER.warning("Ignoring invalid metadata file %s: %s", name, err)
         except MegaError as err:
+            _LOGGER.error("Listing backups in Mega failed: %s", err)
             raise BackupAgentError(f"Failed to list Mega backups: {err}") from err
+        _LOGGER.debug("Found %d backup(s) in Mega folder", len(backups))
         return backups
 
     async def async_get_backup(
