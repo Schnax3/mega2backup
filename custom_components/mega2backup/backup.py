@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Coroutine
+import functools
 import json
 import logging
 import time
@@ -68,6 +69,33 @@ def async_register_backup_agents_listener(
     return remove_listener
 
 
+def _log_unexpected_errors[**P, R](
+    action: str,
+) -> Callable[
+    [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
+]:
+    """Log unexpected errors with a traceback and report them as BackupAgentError."""
+
+    def decorator(
+        func: Callable[P, Coroutine[Any, Any, R]],
+    ) -> Callable[P, Coroutine[Any, Any, R]]:
+        @functools.wraps(func)
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            try:
+                return await func(*args, **kwargs)
+            except BackupAgentError:
+                raise  # already logged where it was raised
+            except Exception as err:
+                _LOGGER.exception("Unexpected error while %s: %s", action, err)
+                raise BackupAgentError(
+                    f"Unexpected error while {action}: {err}"
+                ) from err
+
+        return wrapper
+
+    return decorator
+
+
 def _format_duration(seconds: float) -> str:
     """Return a short human readable duration."""
     minutes, secs = divmod(int(seconds), 60)
@@ -100,6 +128,7 @@ class MegaBackupAgent(BackupAgent):
         self.name = entry.title
         self.unique_id = entry.entry_id
 
+    @_log_unexpected_errors("downloading a backup from Mega")
     async def async_download_backup(
         self,
         backup_id: str,
@@ -109,6 +138,7 @@ class MegaBackupAgent(BackupAgent):
         try:
             files = await self._client.async_list_files(force=True)
         except MegaError as err:
+            _LOGGER.error("Listing backups in Mega failed: %s", err)
             raise BackupAgentError(f"Failed to list Mega backups: {err}") from err
 
         node = files.get(_tar_name(backup_id))
@@ -154,11 +184,15 @@ class MegaBackupAgent(BackupAgent):
                         yield chunk
                 finally:
                     await hass.async_add_executor_job(handle.close)
+            except OSError as err:
+                _LOGGER.error("Reading downloaded backup %s failed: %s", backup_id, err)
+                raise
             finally:
                 await async_remove_dir(hass, tmp_dir)
 
         return _stream()
 
+    @_log_unexpected_errors("uploading a backup to Mega")
     async def async_upload_backup(
         self,
         *,
@@ -280,6 +314,7 @@ class MegaBackupAgent(BackupAgent):
         finally:
             await async_remove_dir(hass, tmp_dir)
 
+    @_log_unexpected_errors("deleting a backup from Mega")
     async def async_delete_backup(
         self,
         backup_id: str,
@@ -302,6 +337,7 @@ class MegaBackupAgent(BackupAgent):
             _LOGGER.error("Deleting backup %s from Mega failed: %s", backup_id, err)
             raise BackupAgentError(f"Failed to delete backup: {err}") from err
 
+    @_log_unexpected_errors("listing backups in Mega")
     async def async_list_backups(self, **kwargs: Any) -> list[AgentBackup]:
         """List backups."""
         try:
@@ -324,6 +360,7 @@ class MegaBackupAgent(BackupAgent):
         _LOGGER.debug("Found %d backup(s) in Mega folder", len(backups))
         return backups
 
+    @_log_unexpected_errors("reading a backup from Mega")
     async def async_get_backup(
         self,
         backup_id: str,
@@ -338,10 +375,13 @@ class MegaBackupAgent(BackupAgent):
                 files = await self._client.async_list_files(force=True)
                 node = files.get(_metadata_name(backup_id))
             if node is None or _tar_name(backup_id) not in files:
+                _LOGGER.warning("Backup %s not found in Mega folder", backup_id)
                 raise BackupNotFound(f"Backup {backup_id} not found")
             data = await self._client.async_read_json(node)
             return AgentBackup.from_dict(data)
         except MegaError as err:
+            _LOGGER.error("Reading backup %s from Mega failed: %s", backup_id, err)
             raise BackupAgentError(f"Failed to get backup: {err}") from err
         except (KeyError, TypeError, ValueError) as err:
+            _LOGGER.error("Invalid metadata file for backup %s: %r", backup_id, err)
             raise BackupAgentError(f"Invalid metadata for {backup_id}: {err}") from err

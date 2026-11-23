@@ -74,22 +74,40 @@ def validate_folder_name(folder: str) -> str:
 
 @contextlib.contextmanager
 def _translate_errors(*, login: bool = False) -> Generator[None]:
-    """Translate library / network errors into MegaError subclasses."""
+    """Translate library / network errors into MegaError subclasses.
+
+    Every error is written to the Home Assistant log.
+    """
     try:
         yield
+    except MegaError:
+        raise  # already translated and logged
     except RequestError as err:
         code = err.code
         if login and code == _ERR_MFA_REQUIRED:
+            _LOGGER.error("Mega login needs two-factor authentication (not supported)")
             raise MegaMfaRequiredError(str(err)) from err
         if login and code in (_ERR_NOT_FOUND, _ERR_BLOCKED):
+            _LOGGER.error("Mega login rejected (code %s): %s", code, err)
             raise MegaAuthError(str(err)) from err
         if code == _ERR_SESSION:
+            _LOGGER.info("Mega session is no longer valid (code %s)", code)
             raise MegaSessionExpiredError(str(err)) from err
+        _LOGGER.error("Mega API error (code %s): %s", code, err)
         raise MegaApiError(str(err)) from err
     except (aiohttp.ClientError, TimeoutError) as err:
+        _LOGGER.error(
+            "Connection to Mega failed (%s): %s",
+            type(err).__name__,
+            err or "no details",
+        )
         raise MegaConnectionError(str(err) or type(err).__name__) from err
     except (MegaNzError, ValidationError, LookupError, RuntimeError) as err:
+        _LOGGER.error("Mega client error (%s): %s", type(err).__name__, err)
         raise MegaApiError(str(err) or type(err).__name__) from err
+    except Exception as err:
+        _LOGGER.exception("Unexpected error in the Mega client: %s", err)
+        raise MegaApiError(f"Unexpected error: {err}") from err
 
 
 @contextlib.contextmanager
