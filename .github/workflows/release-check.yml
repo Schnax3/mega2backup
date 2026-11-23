@@ -1,0 +1,41 @@
+name: Release check
+
+# Makes sure the manifest version matches the release tag and that
+# pre-releases (log everything) and full releases (errors only) are marked
+# consistently. See README, section "Log-Ausgabe".
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - name: Compare manifest, tag and release type
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          version=$(jq -r .version custom_components/mega2backup/manifest.json)
+          tag="${TAG#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::manifest.json version ($version) does not match tag ($TAG)"
+            exit 1
+          fi
+          if echo "$version" | grep -Eiq '[0-9.-](a|b|rc|alpha|beta|pre|dev)\.?[0-9]*$'; then
+            marked=true
+          else
+            marked=false
+          fi
+          if [ "$marked" != "$IS_PRERELEASE" ]; then
+            echo "::error::Release is_prerelease=$IS_PRERELEASE but version '$version' is marked pre-release=$marked (use e.g. 0.2.0b1 or 0.2.0-beta.1 for pre-releases)"
+            exit 1
+          fi
+          echo "OK: $version (pre-release: $IS_PRERELEASE)"

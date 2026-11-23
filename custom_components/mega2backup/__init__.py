@@ -16,6 +16,7 @@ from .const import (
     DATA_BACKUP_AGENT_LISTENERS,
     DEFAULT_FOLDER,
 )
+from .logs import async_setup_log_level
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def _mask_email(email: str) -> str:
 
 async def async_setup_entry(hass: HomeAssistant, entry: MegaConfigEntry) -> bool:
     """Set up Mega Backup from a config entry."""
+    await async_setup_log_level(hass)
     await async_cleanup_temp(hass)
     client = MegaBackupClient(
         hass,

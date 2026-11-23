@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.util.hass_dict import HassKey
 
 DOMAIN = "mega2backup"
+
+# Loggers whose level is chosen by the release type (see logs.py).
+LOGGER_NAMES = ("custom_components.mega2backup", "mega")
+# Full release: errors only. Pre-release: everything.
+LOG_LEVEL_RELEASE = logging.ERROR
+LOG_LEVEL_PRERELEASE = logging.DEBUG
 
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"

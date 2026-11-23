@@ -30,6 +30,7 @@
 - [Einschränkungen](#einschränkungen)
 - [Sicherheit und Datenschutz](#sicherheit-und-datenschutz)
 - [Fehlersuche](#fehlersuche)
+- [Log-Ausgabe](#log-ausgabe)
 - [Häufige Fragen](#häufige-fragen)
 - [Entwicklung und Mitmachen](#entwicklung-und-mitmachen)
 - [English summary](#english-summary)
@@ -165,6 +166,26 @@ logger:
 
 Beim Melden eines Fehlers bitte das Debug-Log anhängen. **Entferne vorher E-Mail-Adresse und andere private Daten.**
 
+## Log-Ausgabe
+
+Wie viel die Integration ins Home-Assistant-Log (*Einstellungen → System → Protokolle*) schreibt, hängt von der Version ab:
+
+| Release-Art | Version in `manifest.json` | Log-Ausgabe |
+| --- | --- | --- |
+| **Vollständiges Release** | zum Beispiel `0.2.0` | nur **Fehler** (`ERROR`) |
+| **Vorabversion (Pre-release)** | zum Beispiel `0.2.0b1`, `0.2.0-beta.1` oder `0.2.0-rc.1` | **alles**, auch Debug-Meldungen (Upload-Fortschritt, Mega-Bibliothek und mehr) |
+
+Das gilt für `custom_components.mega2backup` und für die Mega-Bibliothek `mega`. Ein Pre-release erkennt die Integration an der Version in der `manifest.json`, nicht am GitHub-Häkchen. Setze deshalb für ein Pre-release **beides**: eine Vorabversion in der `manifest.json` und das Häkchen *Set as a pre-release* beim Veröffentlichen. Der Workflow „Release check" meldet einen Fehler, wenn Tag, Version und Häkchen nicht zusammenpassen.
+
+Eigene Einstellungen haben immer Vorrang. Willst du in einem normalen Release trotzdem mehr sehen, trage das in `configuration.yaml` ein:
+
+```yaml
+logger:
+  logs:
+    custom_components.mega2backup: debug
+    mega: debug
+```
+
 ## Häufige Fragen
 
 **Brauche ich Mega Pro?** Nein, auch das kostenlose Konto funktioniert, solange der Speicher für deine Backups reicht.
@@ -183,7 +204,7 @@ Das Repo prüft sich selbst per GitHub Actions: **Hassfest**, **HACS-Validierung
 
 Fehler und Ideen bitte als [Issue](https://github.com/Schnax3/mega2backup/issues) melden. Pull Requests sind willkommen, bitte vorher `ruff check` und `ruff format` ausführen.
 
-Der Marketplace und HACS lesen die Datei `hacs.json` im Hauptverzeichnis und die Prüfungen im Repo heißen deshalb weiterhin „HACS". Ein Release entsteht so: `version` in `custom_components/mega2backup/manifest.json` erhöhen, auf `main` pushen und den Release-Drafter-Entwurf unter *Releases* mit passendem Tag (`v<version>`) veröffentlichen.
+Der Marketplace und HACS lesen die Datei `hacs.json` im Hauptverzeichnis und die Prüfungen im Repo heißen deshalb weiterhin „HACS". Ein Release entsteht so: `version` in `custom_components/mega2backup/manifest.json` erhöhen, auf `main` pushen und den Release-Drafter-Entwurf unter *Releases* mit passendem Tag (`v<version>`) veröffentlichen. Für ein Pre-release eine Vorabversion wie `0.2.0b1` verwenden und das Häkchen *Set as a pre-release* setzen (siehe [Log-Ausgabe](#log-ausgabe)).
 
 ## English summary
 
