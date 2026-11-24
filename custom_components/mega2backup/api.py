@@ -36,6 +36,40 @@ _ERR_MFA_REQUIRED = -26
 
 ProgressCallback = Callable[[int], None]
 
+MIB = 1024 * 1024
+GIB = 1024 * MIB
+
+
+def _read_system_memory() -> tuple[int, int] | None:
+    """Return total and available physical memory in bytes."""
+    try:
+        values: dict[str, int] = {}
+        with open("/proc/meminfo", encoding="ascii") as meminfo:
+            for line in meminfo:
+                key, separator, value = line.partition(":")
+                if separator and key in ("MemTotal", "MemAvailable"):
+                    fields = value.split()
+                    if fields:
+                        values[key] = int(fields[0]) * 1024
+        if "MemTotal" in values and "MemAvailable" in values:
+            return values["MemTotal"], values["MemAvailable"]
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def _select_upload_concurrency(total: int | None, available: int | None) -> int:
+    """Choose upload concurrency based on installed and currently free RAM."""
+    if total is None or available is None:
+        return 1
+    if total >= 8 * GIB and available >= 2 * GIB:
+        return 4
+    if total >= 4 * GIB and available >= 1536 * MIB:
+        return 2
+    if total >= 2 * GIB and available >= GIB:
+        return 2
+    return 1
+
 
 class MegaError(Exception):
     """Base error of the Mega backup client."""
@@ -340,8 +374,34 @@ class MegaBackupClient:
         async def _upload(client: MegaNzClient) -> Node:
             folder = await self._async_ensure_folder(client)
             if self._fast_upload and size >= FAST_UPLOAD_MIN_SIZE:
+                memory = await self._hass.async_add_executor_job(
+                    _read_system_memory
+                )
+                if memory is None:
+                    concurrency = 1
+                    _LOGGER.info(
+                        "Mega upload concurrency: 1 connection "
+                        "(system memory status unavailable)"
+                    )
+                else:
+                    total, available = memory
+                    concurrency = _select_upload_concurrency(total, available)
+                    _LOGGER.info(
+                        "Mega upload concurrency: %d connection%s "
+                        "(%d MiB available of %d MiB total)",
+                        concurrency,
+                        "" if concurrency == 1 else "s",
+                        available // MIB,
+                        total // MIB,
+                    )
                 try:
-                    return await async_fast_upload(client, path, folder.id, on_progress)
+                    return await async_fast_upload(
+                        client,
+                        path,
+                        folder.id,
+                        on_progress,
+                        concurrency,
+                    )
                 except FastUploadUnavailable as err:
                     _LOGGER.warning(
                         "Parallel upload not possible (%s), using the standard "

@@ -93,10 +93,78 @@ async def async_fast_upload(
     chunker = MegaChunker(random_array[:4], random_array[4:])
     upload_url = await request_upload_url(api, file_size)
 
+    if concurrency <= 1:
+        sent = 0
+        responses: list[str] = []
+        handle = await asyncio.to_thread(path.open, "rb")
+
+        def read_and_encrypt(size: int) -> bytes:
+            return chunker.read(handle.read(size))
+
+        try:
+            for offset, size in get_chunks(file_size):
+                data = await asyncio.to_thread(read_and_encrypt, size)
+                response = await _post_chunk(api, upload_url, offset, data)
+                if response:
+                    if _ERROR_CODE_RE.match(response):
+                        raise RuntimeError(
+                            f"Mega rejected the chunk at offset {offset} "
+                            f"(error code {response})"
+                        )
+                    responses.append(response)
+                sent += len(data)
+                if on_progress is not None:
+                    on_progress(sent)
+        finally:
+            handle.close()
+    else:
+        sent = 0
+        responses = []
+        await _upload_parallel(
+            path,
+            chunker,
+            upload_url,
+            file_size,
+            api,
+            concurrency,
+            on_progress,
+            responses,
+        )
+
+    if not responses:
+        raise FastUploadUnavailable("the upload server returned no completion handle")
+    if len(responses) > 1:
+        _LOGGER.debug("Upload returned %d non-empty responses", len(responses))
+    file_handle = responses[-1]
+
+    crypto = Crypto.compose(chunker.key, chunker.iv, chunker.compute_meta_mac())
+    clear_cache()
+    response = await finish_upload(
+        api,
+        master_key,
+        file_handle,
+        path,
+        dest_node_id,
+        crypto.full_key,
+        crypto.key,
+    )
+    return deserialize_node(response["f"][0])
+
+
+async def _upload_parallel(
+    path: Path,
+    chunker: Any,
+    upload_url: str,
+    file_size: int,
+    api: Any,
+    concurrency: int,
+    on_progress: Callable[[int], None] | None,
+    responses: list[str],
+) -> None:
+    """Upload with a bounded in-memory queue for configurable concurrency."""
     queue: asyncio.Queue[tuple[int, bytes] | None] = asyncio.Queue(
         maxsize=concurrency * 2
     )
-    responses: list[str] = []
     sent = 0
 
     def read_and_encrypt(handle: Any, size: int) -> bytes:
@@ -143,22 +211,3 @@ async def async_fast_upload(
     except BaseExceptionGroup as err:
         # Report the first real error instead of the group wrapper.
         raise err.exceptions[0] from None
-
-    if not responses:
-        raise FastUploadUnavailable("the upload server returned no completion handle")
-    if len(responses) > 1:
-        _LOGGER.debug("Upload returned %d non-empty responses", len(responses))
-    file_handle = responses[-1]
-
-    crypto = Crypto.compose(chunker.key, chunker.iv, chunker.compute_meta_mac())
-    clear_cache()
-    response = await finish_upload(
-        api,
-        master_key,
-        file_handle,
-        path,
-        dest_node_id,
-        crypto.full_key,
-        crypto.key,
-    )
-    return deserialize_node(response["f"][0])
