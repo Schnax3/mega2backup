@@ -111,8 +111,9 @@ Ein Backup wird in zwei Schritten zu Mega geschickt:
 
 ```mermaid
 flowchart LR
-    HA[Home Assistant<br/>Backup-Manager] -->|Stream| T[Zwischenspeicher<br/>config/mega2backup_tmp]
-    T -->|verschlüsselter Upload| M[(Mega.io<br/>Ordner)]
+    HA[Home Assistant<br/>Backup-Manager] -->|Backup-Stream| M[(Mega.io<br/>Ordner)]
+    M -->|Download| T[Temporäre Datei<br/>config/mega2backup_tmp]
+    T -->|Stream| HA
     M --- F1[backup-id.tar]
     M --- F2[backup-id.metadata.json]
 ```
@@ -124,9 +125,9 @@ Im Backup-Ordner liegen pro Backup zwei Dateien:
 | `<id>.tar` | das eigentliche Backup |
 | `<id>.metadata.json` | Name, Datum, Größe und enthaltene Komponenten |
 
-- **Zwischenspeicher:** Die verwendete Bibliothek arbeitet mit Dateien. Deshalb landet ein Backup beim Hoch- und Herunterladen kurz in `<config>/mega2backup_tmp`. Der Ordner liegt bewusst auf der Datenpartition und nicht in `/tmp`, weil `/tmp` auf Home Assistant OS im Arbeitsspeicher liegt. Die Integration prüft vorher, ob genug Platz frei ist, und räumt Reste beim Start auf.
-- **Geschwindigkeit:** Große Uploads wählen automatisch ein bis vier Verbindungen je nach installiertem und aktuell verfügbarem Arbeitsspeicher. Bei knappem Speicher wird seriell mit einer Verbindung hochgeladen. Die Verschlüsselung ist dieselbe wie beim normalen Mega-Upload. Falls Mega das parallele Hochladen nicht annimmt, fällt die Integration automatisch auf den normalen Upload zurück und schreibt das ins Log.
-- **Arbeitsspeicher:** Die Daten werden in kleinen Stücken (1 MB) verarbeitet. Auch große Backups brauchen daher wenig RAM.
+- **Zwischenspeicher:** Beim Hochladen wird das Backup direkt aus dem Home-Assistant-Stream in MEGA-Blöcken übertragen; eine vollständige temporäre Kopie wird nicht angelegt. Beim Herunterladen schreibt die verwendete Bibliothek die Datei kurz nach `<config>/mega2backup_tmp`. Der Ordner liegt bewusst auf der Datenpartition und nicht in `/tmp`, weil `/tmp` auf Home Assistant OS im Arbeitsspeicher liegt. Reste werden beim Start aufgeräumt.
+- **Geschwindigkeit:** Große Uploads wählen automatisch ein bis vier Verbindungen je nach installiertem und aktuell verfügbarem Arbeitsspeicher. Bei knappem Speicher wird seriell mit einer Verbindung hochgeladen. Die Verschlüsselung erfolgt lokal, bevor Daten dein System verlassen.
+- **Arbeitsspeicher:** MEGA-Blöcke sind höchstens 1 MB groß; bei parallelen Uploads ist die Anzahl gleichzeitig gepufferter Blöcke begrenzt. Auch große Backups brauchen daher wenig RAM.
 - **Liste:** Die Dateiliste wird bis zu 5 Minuten zwischengespeichert, nach Upload und Löschen sofort verworfen.
 
 ## Einschränkungen
@@ -160,7 +161,7 @@ logger:
 | „Ungültige E-Mail-Adresse oder ungültiges Passwort" | Zugangsdaten falsch oder das Konto ist gesperrt. Probiere die Anmeldung auf mega.io. |
 | „Zwei-Faktor-Authentifizierung wird nicht unterstützt" | 2FA im Mega-Konto ausschalten oder ein separates Konto ohne 2FA nutzen. |
 | „Verbindung zu Mega fehlgeschlagen" | Mega nicht erreichbar oder Netzwerkproblem. Später erneut versuchen. |
-| „Not enough free disk space to stage the backup" | Auf der Datenpartition ist zu wenig Platz. Alte Backups oder Daten löschen. |
+| Mega-Download schlägt wegen lokalem Speicherplatz fehl | Auf der Datenpartition ist zu wenig Platz für die heruntergeladene Datei. Alte Backups oder Daten löschen. |
 | Backup bricht ab, Home Assistant startet neu | Meist Speichermangel. Prüfe freien Plattenplatz und RAM, siehe Log. |
 | Upload wirkt hängend | Große Backups brauchen Zeit. Beobachte den Fortschritt in der Backup-Ansicht und das Debug-Log. |
 | Anmeldung nach Passwortänderung | Home Assistant zeigt „Neu authentifizieren" bei der Integration an. Neues Passwort eingeben. |
@@ -211,7 +212,7 @@ Der Marketplace und HACS lesen die Datei `hacs.json` im Hauptverzeichnis und die
 
 **Mega Backup** adds [Mega.io](https://mega.io) as a backup location for Home Assistant. It registers a backup agent, so Mega shows up next to the other locations in *Settings → System → Backups*. Install it through the Marketplace (*Settings → Marketplace → Add from link*, `Schnax3/mega2backup`; on Home Assistant 2026.10 and older use HACS with a custom repository), restart if asked, then add the **Mega Backup** integration with your Mega e-mail, password and a folder name.
 
-Backups are stored as `<id>.tar` plus `<id>.metadata.json` in one folder at the root of your drive. Deleting a backup removes it permanently. Not supported yet: two-factor authentication. Large backups are staged briefly in `<config>/mega2backup_tmp` (needs free disk space of about one backup). Requires Home Assistant 2025.6 or newer.
+Backups are stored as `<id>.tar` plus `<id>.metadata.json` in one folder at the root of your drive. Deleting a backup removes it permanently. Not supported yet: two-factor authentication. Large uploads stream directly from Home Assistant to Mega without a full local staging copy; downloads are temporarily stored in `<config>/mega2backup_tmp`. Requires Home Assistant 2025.6 or newer.
 
 ## Lizenz
 
