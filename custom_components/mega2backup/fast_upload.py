@@ -129,6 +129,7 @@ async def async_fast_upload(
             concurrency,
             on_progress,
             responses,
+            get_chunks,
         )
 
     if not responses:
@@ -160,6 +161,7 @@ async def _upload_parallel(
     concurrency: int,
     on_progress: Callable[[int], None] | None,
     responses: list[str],
+    get_chunks: Callable[[int], Any],
 ) -> None:
     """Upload with a bounded in-memory queue for configurable concurrency."""
     queue: asyncio.Queue[tuple[int, bytes] | None] = asyncio.Queue(
