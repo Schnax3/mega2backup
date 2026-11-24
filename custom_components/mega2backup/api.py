@@ -374,9 +374,7 @@ class MegaBackupClient:
         async def _upload(client: MegaNzClient) -> Node:
             folder = await self._async_ensure_folder(client)
             if self._fast_upload and size >= FAST_UPLOAD_MIN_SIZE:
-                memory = await self._hass.async_add_executor_job(
-                    _read_system_memory
-                )
+                memory = await self._hass.async_add_executor_job(_read_system_memory)
                 if memory is None:
                     concurrency = 1
                     _LOGGER.info(
