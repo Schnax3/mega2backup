@@ -125,6 +125,7 @@ Im Backup-Ordner liegen pro Backup zwei Dateien:
 | `<id>.metadata.json` | Name, Datum, Größe und enthaltene Komponenten |
 
 - **Zwischenspeicher:** Die verwendete Bibliothek arbeitet mit Dateien. Deshalb landet ein Backup beim Hoch- und Herunterladen kurz in `<config>/mega2backup_tmp`. Der Ordner liegt bewusst auf der Datenpartition und nicht in `/tmp`, weil `/tmp` auf Home Assistant OS im Arbeitsspeicher liegt. Die Integration prüft vorher, ob genug Platz frei ist, und räumt Reste beim Start auf.
+- **Geschwindigkeit:** Große Uploads gehen mit vier Verbindungen gleichzeitig zu Mega, während die nächsten Stücke schon verschlüsselt werden. Die Verschlüsselung ist dieselbe wie beim normalen Mega-Upload. Falls Mega das paralleles Hochladen nicht annimmt, fällt die Integration automatisch auf den normalen Upload zurück und schreibt das ins Log.
 - **Arbeitsspeicher:** Die Daten werden in kleinen Stücken (1 MB) verarbeitet. Auch große Backups brauchen daher wenig RAM.
 - **Liste:** Die Dateiliste wird bis zu 5 Minuten zwischengespeichert, nach Upload und Löschen sofort verworfen.
 

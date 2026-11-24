@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable, Coroutine
 import functools
 import json
@@ -86,6 +87,13 @@ def _log_unexpected_errors[**P, R](
                 return await func(*args, **kwargs)
             except BackupAgentError:
                 raise  # already logged where it was raised
+            except asyncio.CancelledError:
+                _LOGGER.error(
+                    "Cancelled while %s: Home Assistant, the browser or a "
+                    "timeout aborted the operation",
+                    action,
+                )
+                raise
             except Exception as err:
                 _LOGGER.exception("Unexpected error while %s: %s", action, err)
                 raise BackupAgentError(
@@ -136,6 +144,7 @@ class MegaBackupAgent(BackupAgent):
         **kwargs: Any,
     ) -> AsyncIterator[bytes]:
         """Download a backup file."""
+        _LOGGER.info("Home Assistant requested the download of backup %s", backup_id)
         try:
             files = await self._client.async_list_files(force=True)
         except MegaError as err:
@@ -344,6 +353,7 @@ class MegaBackupAgent(BackupAgent):
         **kwargs: Any,
     ) -> None:
         """Delete a backup file."""
+        _LOGGER.debug("Home Assistant asked to delete backup %s", backup_id)
         try:
             files = await self._client.async_list_files(force=True)
             nodes = [

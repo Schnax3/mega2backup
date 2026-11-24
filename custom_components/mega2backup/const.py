@@ -33,6 +33,12 @@ LISTING_CACHE_TTL = 300
 # written to disk (fewer, larger writes are much faster).
 STAGING_BUFFER_SIZE = 8 * 1024 * 1024
 
+# Uploads of at least this size use several parallel connections (fast_upload.py).
+FAST_UPLOAD_MIN_SIZE = 8 * 1024 * 1024
+UPLOAD_CONCURRENCY = 4
+# Attempts per chunk before an upload is given up.
+CHUNK_RETRIES = 4
+
 # Size of the chunks handed to Home Assistant when a backup is downloaded.
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 

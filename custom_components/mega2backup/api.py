@@ -21,7 +21,8 @@ from mega.errors import MegaNzError, RequestError, ValidationError
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
-from .const import INVALID_FOLDER_CHARS, LISTING_CACHE_TTL
+from .const import FAST_UPLOAD_MIN_SIZE, INVALID_FOLDER_CHARS, LISTING_CACHE_TTL
+from .fast_upload import FastUploadUnavailable, async_fast_upload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -204,6 +205,7 @@ class MegaBackupClient:
         self._lock = asyncio.Lock()
         self._files_cache: tuple[float, dict[str, Node]] | None = None
         self._json_cache: dict[str, dict[str, Any]] = {}
+        self._fast_upload = True
 
     @property
     def email(self) -> str:
@@ -333,8 +335,20 @@ class MegaBackupClient:
     ) -> Node:
         """Upload the local file *path* into the backup folder."""
 
+        size = await self._hass.async_add_executor_job(lambda: path.stat().st_size)
+
         async def _upload(client: MegaNzClient) -> Node:
             folder = await self._async_ensure_folder(client)
+            if self._fast_upload and size >= FAST_UPLOAD_MIN_SIZE:
+                try:
+                    return await async_fast_upload(client, path, folder.id, on_progress)
+                except FastUploadUnavailable as err:
+                    _LOGGER.warning(
+                        "Parallel upload not possible (%s), using the standard "
+                        "upload instead",
+                        err,
+                    )
+                    self._fast_upload = False
             with _upload_progress(on_progress):
                 return await client.upload(path, folder.id)
 
