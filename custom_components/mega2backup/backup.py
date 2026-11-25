@@ -33,7 +33,7 @@ from .const import (
     STAGING_BUFFER_SIZE,
     TAR_SUFFIX,
 )
-from .logs import milestone_level
+from .logs import TransferLogger, memory_summary, milestone_level
 
 try:  # Added to Home Assistant in 2026.3
     from homeassistant.components.backup import OnProgressCallback
@@ -120,6 +120,24 @@ def _metadata_name(backup_id: str) -> str:
     return f"{backup_id}{METADATA_SUFFIX}"
 
 
+async def _watch_download(
+    hass: HomeAssistant, tmp_dir: Any, backup_id: str, total: int
+) -> None:
+    """Log the progress of a download by watching the staged file grow."""
+    logger = TransferLogger(_LOGGER, f"Mega download {backup_id}", total or 1)
+
+    def _size() -> int:
+        return sum(f.stat().st_size for f in tmp_dir.glob("**/*") if f.is_file())
+
+    try:
+        while True:
+            await asyncio.sleep(5)
+            done = await hass.async_add_executor_job(_size)
+            logger.update(min(done, total) if total else 0)
+    except (asyncio.CancelledError, OSError):
+        return
+
+
 class MegaBackupAgent(BackupAgent):
     """Backup agent that stores backups in a folder of a Mega account.
 
@@ -172,6 +190,10 @@ class MegaBackupAgent(BackupAgent):
         # async-mega-py downloads to a file, so the backup is staged on disk
         # first and then streamed to Home Assistant.
         tmp_dir = await async_make_temp_dir(self._hass)
+        total = getattr(node, "size", None) or 0
+        watcher = asyncio.create_task(
+            _watch_download(self._hass, tmp_dir, backup_id, total)
+        )
         try:
             path = await self._client.async_download(node, tmp_dir)
         except (MegaError, OSError) as err:
@@ -181,6 +203,8 @@ class MegaBackupAgent(BackupAgent):
         except BaseException:
             await async_remove_dir(self._hass, tmp_dir)
             raise
+        finally:
+            watcher.cancel()
 
         _LOGGER.log(
             milestone_level(),
@@ -220,6 +244,15 @@ class MegaBackupAgent(BackupAgent):
     ) -> None:
         """Upload a backup."""
         hass = self._hass
+        _LOGGER.log(
+            milestone_level(),
+            "Upload of backup %s requested: name '%s', %.1f MiB, HA %s, %s",
+            backup.backup_id,
+            backup.name,
+            backup.size / 2**20,
+            backup.homeassistant_version,
+            memory_summary(),
+        )
         try:
             free = await async_free_space(hass)
         except OSError as err:

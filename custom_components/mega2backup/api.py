@@ -287,6 +287,9 @@ class MegaBackupClient:
                     await self._async_login()
                 client = self._client
             assert client is not None
+            _LOGGER.debug(
+                "Mega call %s (attempt %d)", getattr(func, "__name__", func), attempt
+            )
             try:
                 with _translate_errors():
                     return await func(client)

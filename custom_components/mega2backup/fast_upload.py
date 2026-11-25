@@ -25,11 +25,13 @@ from collections.abc import Callable
 import logging
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 import aiohttp
 
 from .const import CHUNK_RETRIES, UPLOAD_CONCURRENCY
+from .logs import TransferLogger, memory_summary
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +46,16 @@ async def _post_chunk(api: Any, url: str, offset: int, data: bytes) -> str:
     """Send one chunk, retrying transient network errors."""
     for attempt in range(1, CHUNK_RETRIES + 1):
         try:
-            return (await api.upload_chunk(url, offset, data)).strip()
+            started = time.monotonic()
+            result = (await api.upload_chunk(url, offset, data)).strip()
+            _LOGGER.debug(
+                "Chunk at offset %d (%d KiB) sent in %.2f s, response %s",
+                offset,
+                len(data) // 1024,
+                time.monotonic() - started,
+                result[:12] or "(empty)",
+            )
+            return result
         except (aiohttp.ClientError, TimeoutError) as err:
             if attempt == CHUNK_RETRIES:
                 raise
@@ -89,9 +100,25 @@ async def async_fast_upload(
     if file_size == 0:
         raise FastUploadUnavailable("empty file")
 
+    _LOGGER.debug(
+        "Fast upload of %s: %d bytes, concurrency %d, %s",
+        path.name,
+        file_size,
+        concurrency,
+        memory_summary(),
+    )
+    xfer = TransferLogger(_LOGGER, f"Mega upload {path.name}", file_size)
+    user_progress = on_progress
+
+    def on_progress(done: int) -> None:
+        xfer.update(done)
+        if user_progress is not None:
+            user_progress(done)
+
     random_array = random_u32int_array(6)
     chunker = MegaChunker(random_array[:4], random_array[4:])
     upload_url = await request_upload_url(api, file_size)
+    _LOGGER.debug("Received upload URL (host %s)", upload_url.split("/")[2])
 
     if concurrency <= 1:
         sent = 0
@@ -138,6 +165,7 @@ async def async_fast_upload(
         _LOGGER.debug("Upload returned %d non-empty responses", len(responses))
     file_handle = responses[-1]
 
+    _LOGGER.debug("All chunks sent, finishing the upload (%s)", memory_summary())
     crypto = Crypto.compose(chunker.key, chunker.iv, chunker.compute_meta_mac())
     clear_cache()
     response = await finish_upload(
