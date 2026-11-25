@@ -33,6 +33,7 @@ from .const import (
     STAGING_BUFFER_SIZE,
     TAR_SUFFIX,
 )
+from .logs import milestone_level
 
 try:  # Added to Home Assistant in 2026.3
     from homeassistant.components.backup import OnProgressCallback
@@ -144,7 +145,11 @@ class MegaBackupAgent(BackupAgent):
         **kwargs: Any,
     ) -> AsyncIterator[bytes]:
         """Download a backup file."""
-        _LOGGER.info("Home Assistant requested the download of backup %s", backup_id)
+        _LOGGER.log(
+            milestone_level(),
+            "Home Assistant requested the download of backup %s",
+            backup_id,
+        )
         try:
             files = await self._client.async_list_files(force=True)
         except MegaError as err:
@@ -156,7 +161,8 @@ class MegaBackupAgent(BackupAgent):
             _LOGGER.warning("Backup %s not found in Mega folder", backup_id)
             raise BackupNotFound(f"Backup {backup_id} not found")
 
-        _LOGGER.info(
+        _LOGGER.log(
+            milestone_level(),
             "Downloading backup %s from Mega (%.1f MiB), staging it on disk first",
             backup_id,
             (getattr(node, "size", None) or 0) / 2**20,
@@ -176,7 +182,8 @@ class MegaBackupAgent(BackupAgent):
             await async_remove_dir(self._hass, tmp_dir)
             raise
 
-        _LOGGER.info(
+        _LOGGER.log(
+            milestone_level(),
             "Backup %s downloaded from Mega in %s, handing it to Home Assistant",
             backup_id,
             _format_duration(time.monotonic() - started),
@@ -237,7 +244,8 @@ class MegaBackupAgent(BackupAgent):
         started = time.monotonic()
         next_log_percent = 10
 
-        _LOGGER.info(
+        _LOGGER.log(
+            milestone_level(),
             "Starting upload of backup '%s' (%s, %.1f MiB) to Mega folder '%s'",
             backup.name,
             backup.backup_id,
@@ -252,7 +260,8 @@ class MegaBackupAgent(BackupAgent):
             if backup.size > 0:
                 percent = bytes_uploaded * 100 // backup.size
                 while percent >= next_log_percent <= 90:
-                    _LOGGER.info(
+                    _LOGGER.log(
+                        milestone_level(),
                         "Uploading backup %s to Mega: %d%%",
                         backup.backup_id,
                         next_log_percent,
@@ -277,7 +286,8 @@ class MegaBackupAgent(BackupAgent):
                     staged += len(data)
                     if backup.size > 0:
                         while staged * 100 // backup.size >= next_stage_percent:
-                            _LOGGER.info(
+                            _LOGGER.log(
+                                milestone_level(),
                                 "Staging backup %s on disk: %d%% (%d of %d MiB)",
                                 backup.backup_id,
                                 min(next_stage_percent, 100),
@@ -291,7 +301,8 @@ class MegaBackupAgent(BackupAgent):
             finally:
                 await hass.async_add_executor_job(handle.close)
 
-            _LOGGER.info(
+            _LOGGER.log(
+                milestone_level(),
                 "Backup %s staged on disk in %s, uploading to Mega",
                 backup.backup_id,
                 _format_duration(time.monotonic() - started),
@@ -314,14 +325,17 @@ class MegaBackupAgent(BackupAgent):
                 if (node := files.get(name)) is not None
             ]
             if existing:
-                _LOGGER.info(
-                    "Replacing existing backup %s in Mega folder", backup.backup_id
+                _LOGGER.log(
+                    milestone_level(),
+                    "Replacing existing backup %s in Mega folder",
+                    backup.backup_id,
                 )
                 await self._client.async_delete(*existing)
 
             uploaded_nodes.append(await self._client.async_upload(tar_path, _report))
             uploaded_nodes.append(await self._client.async_upload(metadata_path))
-            _LOGGER.info(
+            _LOGGER.log(
+                milestone_level(),
                 "Backup %s uploaded to Mega in %s",
                 backup.backup_id,
                 _format_duration(time.monotonic() - started),
@@ -367,7 +381,7 @@ class MegaBackupAgent(BackupAgent):
                 _LOGGER.debug("Backup %s is not in Mega, nothing to delete", backup_id)
                 raise BackupNotFound(f"Backup {backup_id} not found")
             await self._client.async_delete(*nodes)
-            _LOGGER.info("Deleted backup %s from Mega", backup_id)
+            _LOGGER.log(milestone_level(), "Deleted backup %s from Mega", backup_id)
         except MegaError as err:
             _LOGGER.error("Deleting backup %s from Mega failed: %s", backup_id, err)
             raise BackupAgentError(f"Failed to delete backup: {err}") from err

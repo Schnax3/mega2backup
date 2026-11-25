@@ -16,7 +16,7 @@ from .const import (
     DATA_BACKUP_AGENT_LISTENERS,
     DEFAULT_FOLDER,
 )
-from .logs import async_setup_log_level
+from .logs import async_setup_log_level, milestone_level
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +54,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: MegaConfigEntry) -> bool
         raise ConfigEntryNotReady(f"Could not connect to Mega: {err}") from err
 
     entry.runtime_data = client
-    _LOGGER.info(
+    _LOGGER.log(
+        milestone_level(),
         "Connected to Mega account %s, backups go to folder '%s'",
         _mask_email(entry.data[CONF_EMAIL]),
         client.folder,

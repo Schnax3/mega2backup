@@ -19,10 +19,10 @@ from mega.data_structures import Node
 from mega.errors import MegaNzError, RequestError, ValidationError
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import FAST_UPLOAD_MIN_SIZE, INVALID_FOLDER_CHARS, LISTING_CACHE_TTL
 from .fast_upload import FastUploadUnavailable, async_fast_upload
+from .logs import milestone_level
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -126,7 +126,9 @@ def _translate_errors(*, login: bool = False) -> Generator[None]:
             _LOGGER.error("Mega login rejected (code %s): %s", code, err)
             raise MegaAuthError(str(err)) from err
         if code == _ERR_SESSION:
-            _LOGGER.info("Mega session is no longer valid (code %s)", code)
+            _LOGGER.log(
+                milestone_level(), "Mega session is no longer valid (code %s)", code
+            )
             raise MegaSessionExpiredError(str(err)) from err
         _LOGGER.error("Mega API error (code %s): %s", code, err)
         raise MegaApiError(str(err)) from err
@@ -231,8 +233,9 @@ class MegaBackupClient:
         self._folder = validate_folder_name(folder)
         _redirect_library_temp_files(_temp_base(hass))
         # Transfers can take a long time, so no total timeout.
-        self._session = async_create_clientsession(
-            hass,
+        # Own session (not Home Assistant's shared one): we close it ourselves
+        # on unload, which Home Assistant forbids for its shared sessions.
+        self._session = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=120),
         )
         self._client: MegaNzClient | None = None
@@ -286,7 +289,7 @@ class MegaBackupClient:
             except MegaSessionExpiredError as err:
                 if attempt == 2:
                     raise MegaAuthError(str(err)) from err
-                _LOGGER.info("Mega session expired, logging in again")
+                _LOGGER.log(milestone_level(), "Mega session expired, logging in again")
                 async with self._lock:
                     self._client = None
         raise MegaApiError("unreachable")  # pragma: no cover
@@ -296,7 +299,9 @@ class MegaBackupClient:
         try:
             node = fs.find(self._folder)
         except FileNotFoundError:
-            _LOGGER.info("Creating Mega backup folder '%s'", self._folder)
+            _LOGGER.log(
+                milestone_level(), "Creating Mega backup folder '%s'", self._folder
+            )
             return await client.create_folder(self._folder)
         if not node.is_folder:
             raise MegaApiError(f"'{self._folder}' exists but is not a folder")
