@@ -10,5 +10,5 @@
   "issue_tracker": "https://github.com/Schnax3/mega2backup/issues",
   "loggers": ["mega"],
   "requirements": ["async-mega-py==2.4.1"],
-  "version": "0.0.5b5"
+  "version": "0.0.4b7"
 }
