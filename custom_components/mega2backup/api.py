@@ -242,6 +242,10 @@ class MegaBackupClient:
         self._lock = asyncio.Lock()
         self._files_cache: tuple[float, dict[str, Node]] | None = None
         self._json_cache: dict[str, dict[str, Any]] = {}
+        # Concurrent callers share one listing / one download instead of
+        # repeating it (Home Assistant often asks several times at once).
+        self._list_lock = asyncio.Lock()
+        self._json_locks: dict[str, asyncio.Lock] = {}
         self._fast_upload = True
 
     @property
@@ -311,14 +315,22 @@ class MegaBackupClient:
 
     async def async_list_files(self, *, force: bool = False) -> dict[str, Node]:
         """Return the files in the backup folder, keyed by file name."""
-        cached = self._files_cache
-        if (
-            not force
-            and cached is not None
-            and time.monotonic() - cached[0] < LISTING_CACHE_TTL
-        ):
-            return cached[1]
+        if not force and (files := self._fresh_listing()) is not None:
+            return files
 
+        async with self._list_lock:
+            # Another caller may have refreshed the listing while we waited.
+            if not force and (files := self._fresh_listing()) is not None:
+                return files
+            return await self._async_fetch_listing()
+
+    def _fresh_listing(self) -> dict[str, Node] | None:
+        cached = self._files_cache
+        if cached is not None and time.monotonic() - cached[0] < LISTING_CACHE_TTL:
+            return cached[1]
+        return None
+
+    async def _async_fetch_listing(self) -> dict[str, Node]:
         async def _list(client: MegaNzClient) -> dict[str, Node]:
             folder = await self._async_ensure_folder(client)
             fs = await client.get_filesystem()
@@ -350,7 +362,13 @@ class MegaBackupClient:
         """Download a small JSON file and return its parsed content."""
         if (cached := self._json_cache.get(node.id)) is not None:
             return cached
+        lock = self._json_locks.setdefault(node.id, asyncio.Lock())
+        async with lock:
+            if (cached := self._json_cache.get(node.id)) is not None:
+                return cached
+            return await self._async_read_json_uncached(node)
 
+    async def _async_read_json_uncached(self, node: Node) -> dict[str, Any]:
         tmp_dir = await async_make_temp_dir(self._hass)
         try:
             path = await self.async_download(node, tmp_dir)
@@ -382,14 +400,16 @@ class MegaBackupClient:
                 memory = await self._hass.async_add_executor_job(_read_system_memory)
                 if memory is None:
                     concurrency = 1
-                    _LOGGER.info(
+                    _LOGGER.log(
+                        milestone_level(),
                         "Mega upload concurrency: 1 connection "
-                        "(system memory status unavailable)"
+                        "(system memory status unavailable)",
                     )
                 else:
                     total, available = memory
                     concurrency = _select_upload_concurrency(total, available)
-                    _LOGGER.info(
+                    _LOGGER.log(
+                        milestone_level(),
                         "Mega upload concurrency: %d connection%s "
                         "(%d MiB available of %d MiB total)",
                         concurrency,
