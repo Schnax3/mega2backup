@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Generator
+from collections.abc import AsyncIterator, Awaitable, Callable, Generator
 import contextlib
 import json
 import logging
@@ -21,7 +21,11 @@ from mega.errors import MegaNzError, RequestError, ValidationError
 from homeassistant.core import HomeAssistant
 
 from .const import FAST_UPLOAD_MIN_SIZE, INVALID_FOLDER_CHARS, LISTING_CACHE_TTL
-from .fast_upload import FastUploadUnavailable, async_fast_upload
+from .fast_upload import (
+    FastUploadUnavailable,
+    async_fast_upload,
+    async_fast_upload_stream,
+)
 from .logs import milestone_level
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,6 +75,30 @@ def _select_upload_concurrency(total: int | None, available: int | None) -> int:
     if available >= 256 * MIB:
         return 2
     return 1
+
+
+async def _async_upload_concurrency(hass: HomeAssistant) -> int:
+    """Choose and log the number of connections to use for a Mega upload."""
+    memory = await hass.async_add_executor_job(_read_system_memory)
+    if memory is None:
+        concurrency = 2
+        _LOGGER.log(
+            milestone_level(),
+            "Mega upload concurrency: 2 connections (system memory status unavailable)",
+        )
+    else:
+        total, available = memory
+        concurrency = _select_upload_concurrency(total, available)
+        _LOGGER.log(
+            milestone_level(),
+            "Mega upload concurrency: %d connection%s "
+            "(%d MiB available of %d MiB total)",
+            concurrency,
+            "" if concurrency == 1 else "s",
+            available // MIB,
+            total // MIB,
+        )
+    return concurrency
 
 
 class MegaError(Exception):
@@ -402,26 +430,7 @@ class MegaBackupClient:
         async def _upload(client: MegaNzClient) -> Node:
             folder = await self._async_ensure_folder(client)
             if self._fast_upload and size >= FAST_UPLOAD_MIN_SIZE:
-                memory = await self._hass.async_add_executor_job(_read_system_memory)
-                if memory is None:
-                    concurrency = 2
-                    _LOGGER.log(
-                        milestone_level(),
-                        "Mega upload concurrency: 2 connections "
-                        "(system memory status unavailable)",
-                    )
-                else:
-                    total, available = memory
-                    concurrency = _select_upload_concurrency(total, available)
-                    _LOGGER.log(
-                        milestone_level(),
-                        "Mega upload concurrency: %d connection%s "
-                        "(%d MiB available of %d MiB total)",
-                        concurrency,
-                        "" if concurrency == 1 else "s",
-                        available // MIB,
-                        total // MIB,
-                    )
+                concurrency = await _async_upload_concurrency(self._hass)
                 try:
                     return await async_fast_upload(
                         client,
@@ -442,6 +451,48 @@ class MegaBackupClient:
 
         try:
             return await self._call(_upload)
+        finally:
+            self.invalidate_cache()
+
+    async def async_upload_stream(
+        self,
+        open_stream: Callable[[], Awaitable[AsyncIterator[bytes]]],
+        file_name: str,
+        file_size: int,
+        on_progress: ProgressCallback | None = None,
+    ) -> Node:
+        """Upload a Home Assistant backup stream without writing it to disk."""
+
+        async def _upload(client: MegaNzClient) -> Node:
+            folder = await self._async_ensure_folder(client)
+            concurrency = await _async_upload_concurrency(self._hass)
+            try:
+                return await async_fast_upload_stream(
+                    client,
+                    open_stream,
+                    file_name,
+                    file_size,
+                    folder.id,
+                    on_progress,
+                    concurrency,
+                )
+            except FastUploadUnavailable as err:
+                _LOGGER.error("Streaming Mega upload is unavailable: %s", err)
+                raise MegaApiError(f"Streaming upload unavailable: {err}") from err
+
+        try:
+            return await self._call(_upload)
+        finally:
+            self.invalidate_cache()
+
+    async def async_rename(self, node: Node, new_name: str) -> None:
+        """Rename a Mega file."""
+
+        async def _rename(client: MegaNzClient) -> None:
+            await client.rename(node, new_name)
+
+        try:
+            await self._call(_rename)
         finally:
             self.invalidate_cache()
 
@@ -511,11 +562,6 @@ def _remove_dir(path: Path | str) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
-def _free_space(base: Path) -> int:
-    base.mkdir(parents=True, exist_ok=True)
-    return shutil.disk_usage(base).free
-
-
 async def async_make_temp_dir(hass: HomeAssistant) -> Path:
     """Create a temporary working directory."""
     base = _temp_base(hass)
@@ -530,8 +576,3 @@ async def async_remove_dir(hass: HomeAssistant, path: Path) -> None:
 async def async_cleanup_temp(hass: HomeAssistant) -> None:
     """Remove leftovers of interrupted transfers (call when no transfer runs)."""
     await hass.async_add_executor_job(_remove_dir, _temp_base(hass))
-
-
-async def async_free_space(hass: HomeAssistant) -> int:
-    """Return the free bytes on the staging partition."""
-    return await hass.async_add_executor_job(_free_space, _temp_base(hass))

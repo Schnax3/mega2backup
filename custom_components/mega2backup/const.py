@@ -29,10 +29,6 @@ METADATA_SUFFIX = ".metadata.json"
 # How long the folder listing is cached (seconds).
 LISTING_CACHE_TTL = 300
 
-# Chunks of a backup stream are collected up to this size before they are
-# written to disk (fewer, larger writes are much faster).
-STAGING_BUFFER_SIZE = 8 * 1024 * 1024
-
 # Uploads of at least this size use parallel connections when concurrency is
 # greater than one (fast_upload.py).
 FAST_UPLOAD_MIN_SIZE = 8 * 1024 * 1024
