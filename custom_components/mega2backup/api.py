@@ -59,14 +59,16 @@ def _read_system_memory() -> tuple[int, int] | None:
 
 
 def _select_upload_concurrency(total: int | None, available: int | None) -> int:
-    """Choose upload concurrency based on installed and currently free RAM."""
+    """Choose upload concurrency based on currently free RAM.
+
+    Chunks are at most 1 MiB and the queue holds two per connection, so four
+    connections need only a few MiB. Free RAM is just a safety margin.
+    """
     if total is None or available is None:
-        return 1
-    if total >= 8 * GIB and available >= 2 * GIB:
-        return 4
-    if total >= 4 * GIB and available >= 1536 * MIB:
         return 2
-    if total >= 2 * GIB and available >= GIB:
+    if available >= 512 * MIB:
+        return 4
+    if available >= 256 * MIB:
         return 2
     return 1
 
@@ -402,10 +404,10 @@ class MegaBackupClient:
             if self._fast_upload and size >= FAST_UPLOAD_MIN_SIZE:
                 memory = await self._hass.async_add_executor_job(_read_system_memory)
                 if memory is None:
-                    concurrency = 1
+                    concurrency = 2
                     _LOGGER.log(
                         milestone_level(),
-                        "Mega upload concurrency: 1 connection "
+                        "Mega upload concurrency: 2 connections "
                         "(system memory status unavailable)",
                     )
                 else:

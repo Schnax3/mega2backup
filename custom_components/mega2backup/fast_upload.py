@@ -48,13 +48,15 @@ async def _post_chunk(api: Any, url: str, offset: int, data: bytes) -> str:
         try:
             started = time.monotonic()
             result = (await api.upload_chunk(url, offset, data)).strip()
-            _LOGGER.debug(
-                "Chunk at offset %d (%d KiB) sent in %.2f s, response %s",
-                offset,
-                len(data) // 1024,
-                time.monotonic() - started,
-                result[:12] or "(empty)",
-            )
+            took = time.monotonic() - started
+            if took > 3 or result:
+                _LOGGER.debug(
+                    "Chunk at offset %d (%d KiB) sent in %.2f s, response %s",
+                    offset,
+                    len(data) // 1024,
+                    took,
+                    result[:12] or "(empty)",
+                )
             return result
         except (aiohttp.ClientError, TimeoutError) as err:
             if attempt == CHUNK_RETRIES:
